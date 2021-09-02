@@ -25,7 +25,7 @@ contract Subscriptions is Ownable, EIP712Base{
   }
 
   //keccak(creator, price);
-  mapping(bytes32 => Tier) private _subscriptionDefintions;
+  mapping(bytes32 => Tier) private _tiers;
   //keccak(creator,subscriber)
   mapping(bytes32 => Subscription) private _subscriptions;
 
@@ -38,37 +38,48 @@ contract Subscriptions is Ownable, EIP712Base{
   }
 
   function createTier(uint256 price) public returns (bytes32){
+    return _updateTier(price);
+  }
+
+  function changePrice(bytes32 tierId, uint256 price) public returns (bytes32){
+    Tier storage tier = _tiers[tierId];
+    require(_msgSender() == tier.creator);
+    delete(_tiers[tierId]);
+    return _updateTier(price);
+  }
+
+  function _updateTier(uint256 price) private returns (bytes32){
     require(price > 0,"price too low");
     uint256 motoFee = _calculateFee(price);
     bytes32 tierId = keccak256(abi.encodePacked(_msgSender(),price));
-    _subscriptionDefintions[tierId] = Tier(true, tierId, _msgSender(),price+motoFee, _commission);
+    _tiers[tierId] = Tier(true, tierId, _msgSender(),price+motoFee, _commission);
     return tierId;
   }
 
-  function cancelTier(bytes32 subDefId) external{
-    Tier storage subDef = _subscriptionDefintions[subDefId];
-    require(_msgSender() == subDef.creator);
-    _subscriptionDefintions[subDefId].valid = false;
+  function cancelTier(bytes32 tierId) external{
+    Tier storage tier = _tiers[tierId];
+    require(_msgSender() == tier.creator);
+    _tiers[tierId].valid = false;
   }
-  function subscribe(bytes32 subDefinitionId, uint256 amount) public{
-    Tier storage subDef = _subscriptionDefintions[subDefinitionId];
-    require(subDef.creator != address(0));
-    require(amount >= subDef.price);
-    uint256 den = (100 + subDef.motoCommission)/100;
-    uint256 creatorAmount = amount / den;
+  function subscribe(bytes32 tierId, uint256 amount) public{
+    Tier storage tier = _tiers[tierId];
+    require(tier.creator != address(0));
+    require(amount >= tier.price);
+    uint256 denom = (100 + tier.motoCommission)/100;
+    uint256 creatorAmount = amount / denom;
     uint256 motoAmount = amount - creatorAmount;
-    uint256 monthsBought = creatorAmount/subDef.price;
+    uint256 monthsBought = creatorAmount/tier.price;
     uint256 addedTime = block.timestamp + monthsBought * 30 days ;
-    bytes32 subscriptionId = keccak256(abi.encodePacked(subDef.creator,_msgSender()));
+    bytes32 subscriptionId = keccak256(abi.encodePacked(tier.creator,_msgSender()));
     Subscription memory subscription = getSubscription(subscriptionId);
     if(subscription.expirationDate > block.timestamp){
       subscription.expirationDate = subscription.expirationDate + addedTime;
     }
     else{
-      _subscriptions[subscriptionId] = Subscription(subDef, block.timestamp + addedTime);
+      _subscriptions[subscriptionId] = Subscription(tier, block.timestamp + addedTime);
 
     }
-    _acceptedToken.transferFrom(_msgSender(),subDef.creator,creatorAmount);
+    _acceptedToken.transferFrom(_msgSender(),tier.creator,creatorAmount);
     _acceptedToken.transferFrom(_msgSender(),owner(), motoAmount);
   } 
 
@@ -76,11 +87,15 @@ contract Subscriptions is Ownable, EIP712Base{
     return _subscriptions[subscriptionId];
   }
 
+  function getTier(bytes32 tierId) public view returns (Tier memory){
+    return _tiers[tierId];
+  }
+
   function _calculateFee(uint256 amount) private view returns (uint256){
     return (amount * _commission) / 100;
   }
 
-  function changeCommission(uint256 amount) external {
+  function changeCommission(uint256 amount) external onlyOwner{
     require(amount <= 5, "fee must be less than 5 percent");
     _commission = amount;
   }
