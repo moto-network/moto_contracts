@@ -14,7 +14,7 @@ contract Subscriptions is Ownable, EIP712Base{
   struct Tier {
     bool valid;
     bytes32 tierId;
-    address creator;
+    address owner;
     uint256 price;
     uint256 motoCommission;
   }
@@ -24,9 +24,9 @@ contract Subscriptions is Ownable, EIP712Base{
     uint256 expirationDate;
   }
 
-  //keccak(creator, price);
+  //keccak(owner, price);
   mapping(bytes32 => Tier) private _tiers;
-  //keccak(creator,subscriber)
+  //keccak(subscriber,tierID)
   mapping(bytes32 => Subscription) private _subscriptions;
 
   uint256 private _commission = 2;//in percent
@@ -43,7 +43,7 @@ contract Subscriptions is Ownable, EIP712Base{
 
   function changePrice(bytes32 tierId, uint256 price) public returns (bytes32){
     Tier storage tier = _tiers[tierId];
-    require(_msgSender() == tier.creator);
+    require(_msgSender() == tier.owner);
     delete(_tiers[tierId]);
     return _updateTier(price);
   }
@@ -58,28 +58,30 @@ contract Subscriptions is Ownable, EIP712Base{
 
   function cancelTier(bytes32 tierId) external{
     Tier storage tier = _tiers[tierId];
-    require(_msgSender() == tier.creator);
+    require(_msgSender() == tier.owner);
     _tiers[tierId].valid = false;
   }
   function subscribe(bytes32 tierId, uint256 amount) public{
     Tier storage tier = _tiers[tierId];
-    require(tier.creator != address(0));
+    require(tier.owner != address(0));
     require(amount >= tier.price);
-    uint256 denom = (100 + tier.motoCommission)/100;
-    uint256 creatorAmount = amount / denom;
+    uint256 denom = (100 + tier.motoCommission);
+    uint256 intermediaryValue = amount / denom;
+    uint256 creatorAmount = intermediaryValue * 100;
     uint256 motoAmount = amount - creatorAmount;
-    uint256 monthsBought = creatorAmount/tier.price;
-    uint256 addedTime = block.timestamp + monthsBought * 30 days ;
-    bytes32 subscriptionId = keccak256(abi.encodePacked(tier.creator,_msgSender()));
+    uint256 monthsBought = (creatorAmount*100)/tier.price;
+    uint256 bigTime = monthsBought * 30 * 1 days;
+    uint256 smallTime = bigTime/100;
+    bytes32 subscriptionId = keccak256(abi.encodePacked(_msgSender(),tier.tierId));
     Subscription memory subscription = getSubscription(subscriptionId);
     if(subscription.expirationDate > block.timestamp){
-      subscription.expirationDate = subscription.expirationDate + addedTime;
+      subscription.expirationDate = subscription.expirationDate + smallTime;
     }
     else{
-      _subscriptions[subscriptionId] = Subscription(tier, block.timestamp + addedTime);
+      _subscriptions[subscriptionId] = Subscription(tier, block.timestamp + smallTime);
 
     }
-    _acceptedToken.transferFrom(_msgSender(),tier.creator,creatorAmount);
+    _acceptedToken.transferFrom(_msgSender(),tier.owner,creatorAmount);
     _acceptedToken.transferFrom(_msgSender(),owner(), motoAmount);
   } 
 
